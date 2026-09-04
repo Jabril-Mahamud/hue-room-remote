@@ -39,8 +39,12 @@ CREDS_FILE = os.path.join(
 
 SCAN_TIMEOUT = 10.0
 CT_MIN, CT_MAX = 153, 500
-# How long to let HueBLE's own reconnect finish before taking over.
-RECONNECT_WAIT = 8.0
+# How long to let HueBLE's own reconnect finish before taking over. It
+# retries five times internally with backoff, which can run past 8s; taking
+# over before it has finished just recreates the InProgress race this wait
+# exists to avoid. Tune upward if the logs still show its reconnect task
+# failing while a takeover is in flight.
+RECONNECT_WAIT = 15.0
 RECONNECT_POLL = 0.5
 STATE_CACHE_SECONDS = 1.5
 # Colour names are resolved to CIE xy here so a scene file can say "red"

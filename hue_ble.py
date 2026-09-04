@@ -25,7 +25,9 @@ LIGHT_ID = "1"
 GROUP_ID = "1"
 
 SOCKET_NAME = "hue-ble.sock"
-DEFAULT_TIMEOUT = 20.0
+# Must exceed the daemon's reconnect wait plus a connect, or a caller
+# times out exactly when the daemon is busy recovering the link.
+DEFAULT_TIMEOUT = 45.0
 
 # Same ceiling as a bridge reply. The daemon is local and trusted, but a
 # wedged writer shouldn't be able to grow this process without bound.
