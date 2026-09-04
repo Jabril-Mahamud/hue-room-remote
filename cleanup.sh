@@ -40,6 +40,18 @@ if [[ -f "$STATE_FILE" ]]; then
   fi
 fi
 
+# The BLE transport leaves a systemd user service behind as well as the
+# credentials file, and a daemon still holding the bulb's one connection
+# would lock out anything installed after this.
+UNIT="$HOME/.config/systemd/user/hue-ble-daemon.service"
+if [[ -f "$UNIT" ]]; then
+  systemctl --user disable --now hue-ble-daemon.service >/dev/null 2>&1 || true
+  rm -f "$UNIT"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  echo "Removed $UNIT"
+  removed=$((removed + 1))
+fi
+
 if [[ $removed -eq 0 ]]; then
   echo "No Hue files found to remove."
 fi

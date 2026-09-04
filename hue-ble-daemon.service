@@ -1,0 +1,20 @@
+[Unit]
+Description=Hue BLE connection daemon for hue-room-remote
+Documentation=https://github.com/lunardi0x01/hue-room-remote
+After=bluetooth.target
+# A bulb left unpowered makes the daemon fail repeatedly; without this it
+# would trip the default start limit and stay dead long after the bulb came
+# back. Belongs in [Unit] -- systemd ignores it under [Service].
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# The daemon needs an interpreter with `bleak` and `HueBLE` installed. If
+# those live somewhere other than the system python3 (a venv, pyenv, or a
+# Homebrew python), point ExecStart at that interpreter instead.
+ExecStart=/usr/bin/env python3 %h/.config/omarchy/plugins/lunardi0x01.hue-room-remote/hue_ble_daemon.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

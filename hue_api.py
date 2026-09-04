@@ -212,7 +212,69 @@ def _get_status():
     except Exception:
         print(json.dumps({"paired": False}))
         return
+    ble = _ble_config(creds)
+    if ble is not None:
+        # No bridge means no bridge certificate to verify, so bridgeId stays
+        # absent here and `transport` is what stops panel.qml reading that
+        # absence as "TLS verification disabled".
+        print(json.dumps({"paired": True, "transport": "ble"}))
+        return
     print(json.dumps({"paired": True, "bridgeId": _read_bridge_id(creds)}))
+
+
+def _ble_config(creds):
+    """Return the validated `ble` block from hue.json, or None for bridge mode.
+
+    Imported lazily so the bridge path never pays for it, and so a broken
+    hue_ble.py can't take the bridge transport down with it.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import hue_ble
+        return hue_ble.ble_config(creds)
+    except Exception:
+        return None
+
+
+def _dispatch_ble(op):
+    """Serve a bridge-shaped reply for a bulb reached over Bluetooth LE.
+
+    hue_ble.request() raises if the daemon is down or the bulb is
+    unreachable, which the caller turns into a non-zero exit -- the same
+    signal panel.qml already expects from a failed bridge call.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hue_ble
+
+    creds = _load_creds()
+    cfg = hue_ble.ble_config(creds)
+
+    if op == "get-scenes":
+        # Scenes are read straight from the local file; no need to wake the
+        # bulb to list them.
+        print(json.dumps(hue_ble.scenes_payload(hue_ble.load_scenes())))
+        return
+
+    if op in ("put-light", "put-group") and len(sys.argv) >= 4:
+        action = json.loads(sys.argv[3])
+        if op == "put-light":
+            # A single-bulb room and its one light are the same device, so a
+            # light state and a group action map to the same request.
+            action = dict(action)
+            action.pop("scene", None)
+        request = hue_ble.group_action_to_request(action)
+        if request is None:
+            return
+        hue_ble.request(request)
+        return
+
+    state = hue_ble.request({"op": "state"})["state"]
+    if op == "get-lights":
+        print(json.dumps(hue_ble.lights_payload(state, cfg)))
+    elif op == "get-groups":
+        print(json.dumps(hue_ble.groups_payload(state, cfg)))
+    elif op == "verify":
+        print(1)
 
 
 def _dispatch(op):
@@ -235,6 +297,10 @@ def _dispatch(op):
     # `except Exception: pass` instead of being caught by it.
     try:
         creds = _load_creds()
+
+        if _ble_config(creds) is not None:
+            _dispatch_ble(op)
+            return
 
         if op == "get-lights":
             print(json.dumps(_request("/lights", creds)))

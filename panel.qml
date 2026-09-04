@@ -39,7 +39,10 @@ Panel {
 
   readonly property var activeRoom: root.findRoom(root.activeRoomId)
   readonly property int roomCount: root.visibleRooms.length
-  readonly property bool insecureMode: root.paired && !root.bridgeId
+  property string transport: "bridge"
+  // A BLE bulb is reached directly over Bluetooth, so there is no bridge
+  // certificate to verify and no bridgeId to be missing.
+  readonly property bool insecureMode: root.paired && root.transport !== "ble" && !root.bridgeId
   readonly property var orderedRooms: HueApi.applyOrder(root.visibleRooms, root.roomOrder)
   readonly property var orderedScenesForActiveRoom: HueApi.applyOrder(
     root.scenes.filter(function(s) { return s.group === root.activeRoomId }),
@@ -52,7 +55,7 @@ Panel {
 
   readonly property string statusText: {
     if (!root.paired) return "Not paired"
-    if (root.lastFetchFailed) return "Bridge unreachable"
+    if (root.lastFetchFailed) return root.transport === "ble" ? "Light unreachable" : "Bridge unreachable"
     if (root.loading) return "Loading…"
     return ""
   }
@@ -391,6 +394,7 @@ Panel {
         var wasPaired = root.paired
         root.paired = !!(status && status.paired)
         root.bridgeId = (status && status.bridgeId) || ""
+        root.transport = (status && status.transport) || "bridge"
         if (root.refreshAfterStatus) {
           root.refreshAfterStatus = false
           root.refresh()
@@ -403,6 +407,7 @@ Panel {
       if (exitCode !== 0) {
         root.paired = false
         root.bridgeId = ""
+        root.transport = "bridge"
       }
     }
   }
@@ -661,7 +666,12 @@ Panel {
           Text {
             visible: root.paired && root.lastFetchFailed && !root.loading
             width: parent.width
-            text: "Couldn't reach the bridge. Check the bridge is on and the IP is still valid, then re-run pair.sh."
+            // Two transports fail for completely different reasons, and the
+            // bridge wording sends a Bluetooth user looking for hardware
+            // they do not own.
+            text: root.transport === "ble"
+              ? "Couldn't reach the light. Check it has mains power and that hue-ble-daemon is running (systemctl --user status hue-ble-daemon)."
+              : "Couldn't reach the bridge. Check the bridge is on and the IP is still valid, then re-run pair.sh."
             color: Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption

@@ -100,7 +100,11 @@ function parseStatus(text) {
   if (!obj) return null
   var bridgeId = String(obj.bridgeId || "").trim().toLowerCase()
   if (bridgeId && !isValidId(bridgeId)) bridgeId = ""
-  return { paired: !!obj.paired, bridgeId: bridgeId }
+  // Only "ble" is recognised; anything else (including absent) means the
+  // bridge transport, so an unexpected value can never suppress the
+  // missing-bridgeId warning that bridge users depend on.
+  var transport = obj.transport === "ble" ? "ble" : "bridge"
+  return { paired: !!obj.paired, bridgeId: bridgeId, transport: transport }
 }
 
 function parseJsonObject(text) {

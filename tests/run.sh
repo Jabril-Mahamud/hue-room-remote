@@ -8,6 +8,10 @@ echo "== Python (hue_api.py) =="
 python3 -m unittest tests.test_hue_api -v || status=1
 
 echo
+echo "== Python (hue_ble.py) =="
+python3 -m unittest tests.test_hue_ble -v || status=1
+
+echo
 echo "== JS (hue_api.js) =="
 node --test tests/hue_api.test.js || status=1
 

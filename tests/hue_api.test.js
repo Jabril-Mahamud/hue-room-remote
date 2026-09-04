@@ -64,11 +64,11 @@ test("sanitizeIdMap returns an empty object for non-object input", () => {
 
 test("parseStatus accepts a well-formed status", () => {
   const status = HueApi.parseStatus(JSON.stringify({ paired: true, bridgeId: "AABBCC" }))
-  assert.deepEqual(status, { paired: true, bridgeId: "aabbcc" })
+  assert.deepEqual(status, { paired: true, bridgeId: "aabbcc", transport: "bridge" })
 })
 
 test("parseStatus reports unpaired", () => {
-  assert.deepEqual(HueApi.parseStatus(JSON.stringify({ paired: false })), { paired: false, bridgeId: "" })
+  assert.deepEqual(HueApi.parseStatus(JSON.stringify({ paired: false })), { paired: false, bridgeId: "", transport: "bridge" })
 })
 
 test("parseStatus returns null for malformed input", () => {
@@ -78,7 +78,21 @@ test("parseStatus returns null for malformed input", () => {
 
 test("parseStatus drops an invalid bridgeId but keeps paired", () => {
   const status = HueApi.parseStatus(JSON.stringify({ paired: true, bridgeId: "has space" }))
-  assert.deepEqual(status, { paired: true, bridgeId: "" })
+  assert.deepEqual(status, { paired: true, bridgeId: "", transport: "bridge" })
+})
+
+test("parseStatus reports the ble transport", () => {
+  const status = HueApi.parseStatus(JSON.stringify({ paired: true, transport: "ble" }))
+  assert.deepEqual(status, { paired: true, bridgeId: "", transport: "ble" })
+})
+
+test("parseStatus treats an unknown transport as bridge", () => {
+  // Anything but "ble" has to fall back to "bridge", otherwise a junk value
+  // would suppress the missing-bridgeId warning bridge users rely on.
+  for (const bogus of ["zigbee", "", 7, null, {}]) {
+    const status = HueApi.parseStatus(JSON.stringify({ paired: true, bridgeId: "aabbcc", transport: bogus }))
+    assert.equal(status.transport, "bridge")
+  }
 })
 
 test("parseJsonObject rejects text over the size cap", () => {

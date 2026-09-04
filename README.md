@@ -1,7 +1,8 @@
 # hue-room-remote
 
 Omarchy / Quickshell bar widget for controlling Philips Hue lights by room,
-over the bridge's local HTTP API (v1).
+over the bridge's local HTTP API (v1), or over Bluetooth LE direct to a
+bulb when there is no bridge.
 
 <p align="center">
   <img src="preview.png" alt="hue-room-remote panel screenshot" width="360">
@@ -31,6 +32,8 @@ over the bridge's local HTTP API (v1).
 
 - Arch Linux + Omarchy (Quickshell-based shell)
 - `curl`, `python3` (for the pairing script), `omarchy-shell`
+- Bluetooth transport only: `bluez-utils`, and `bleak` + `HueBLE` for the
+  daemon's interpreter
 
 ## Install
 
@@ -54,6 +57,71 @@ You can also pair manually:
 
 Pass an IP directly to skip auto-discovery: `pair.sh 192.168.1.14`.
 
+## Bluetooth LE (no bridge)
+
+Hue bulbs sold since roughly 2019 speak Bluetooth as well as Zigbee, so a
+single bulb can be driven without owning a bridge at all. Set it up with:
+
+```sh
+~/.config/omarchy/plugins/lunardi0x01.hue-room-remote/ble_setup.sh
+```
+
+It scans for bulbs, writes the one you pick into the same `hue.json` the
+bridge path uses, and installs `hue-ble-daemon.service` as a systemd **user**
+service. The panel then works as it always does -- the bulb appears as a
+single room you can toggle, dim and apply scenes to.
+
+If `bleak` and `HueBLE` live somewhere other than the system `python3` (a
+venv, pyenv, or Homebrew python), point the setup script at that interpreter:
+
+```sh
+HUE_BLE_PYTHON=/path/to/python3 ./ble_setup.sh
+```
+
+### Why there is a daemon
+
+A Hue bulb accepts exactly one BLE connection, and a cold
+scan-connect-read costs 5-14 s. Spawning a fresh connection per panel click
+would make the UI unusable and would lock every other tool out of the bulb.
+`hue_ble_daemon.py` holds one connection open and serves it over a unix
+socket in `$XDG_RUNTIME_DIR`, which puts a panel action at about 1 s and a
+cached read at ~40 ms. It also means anything else on the machine can drive
+the same bulb through the daemon instead of fighting it for the radio.
+
+### Scenes
+
+There are no bridge-stored scenes without a bridge, so scenes come from
+`~/.config/hue-scenes.json`:
+
+```json
+{
+  "evening": { "colour": "orange", "brightness": 60 },
+  "day":     { "temp": 250, "brightness": 254 },
+  "night":   { "temp": 500, "brightness": 12 },
+  "off":     { "power": false }
+}
+```
+
+Each key becomes a scene in the panel. `temp` is in mireds (153 cool - 500
+warm), `brightness` is 1-254, and `colour` is one of the names in
+`hue_ble_daemon.py`'s `COLOURS` table. Any scene that sets something other
+than `power` implies the light should be on.
+
+### Switching back to a bridge
+
+Delete `"transport"` from `~/.local/state/omarchy/settings/hue.json` and
+`systemctl --user disable --now hue-ble-daemon`. Bridge credentials in that
+file are left untouched by BLE setup, so nothing needs re-pairing.
+
+### Limitations
+
+- One bulb per install. The panel's room model is synthesised from that
+  single light, so grouping several BLE bulbs is not supported.
+- Bluetooth range only, and the bulb must be mains-powered to be reachable
+  -- a bulb switched off at the wall does not advertise.
+- A bulb still connected to the Hue phone app will not accept the daemon's
+  connection; close the app first.
+
 ## Remove
 
 ```sh
@@ -67,6 +135,9 @@ plugin so no auth token is left behind.
 
 ## Notes
 
+- The Bluetooth transport bypasses the bridge entirely and touches none of
+  the TLS/pairing machinery below; `transport: "ble"` in `hue.json` is what
+  selects it, and the panel's own QML is shared by both transports.
 - Speaks to the bridge over **HTTPS** on your LAN with the v1 API
   (`/api/<username>/lights`, `/groups`, etc.) — no cloud, no SDK.
 - TLS is verified with the bundled `hue_bridge_cacert.pem`, the official
