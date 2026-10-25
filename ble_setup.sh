@@ -18,6 +18,19 @@ command -v bluetoothctl >/dev/null || die "bluetoothctl not found (install bluez
 "$PYTHON" -c 'import bleak, HueBLE' 2>/dev/null \
   || die "$PYTHON is missing bleak/HueBLE. Install them, or set HUE_BLE_PYTHON to an interpreter that has them."
 
+cat <<EOF
+Put the bulb in pairing mode first: in the Hue app, open
+Settings > Voice assistants > Amazon Alexa (no Alexa needed -- opening it
+makes the bulb discoverable), then turn the phone's Bluetooth off so it
+releases the bulb.
+
+EOF
+read -rp "Press enter when ready. "
+
+# A running daemon holds the bulb's only connection and would collide with
+# the pairing below as org.bluez.Error.InProgress.
+systemctl --user stop hue-ble-daemon.service 2>/dev/null || true
+
 echo "Scanning for Hue bulbs (20s)..."
 # Match on the Philips/Signify service UUID (fe0f) rather than the device
 # name: a bulb that has been factory reset advertises under a rotating
@@ -43,7 +56,7 @@ asyncio.run(main())
 PY
 )
 
-[ "${#FOUND[@]}" -gt 0 ] || die "no Hue bulbs found. Check the bulb has mains power, and close the Hue phone app -- a bulb already connected to it stops advertising."
+[ "${#FOUND[@]}" -gt 0 ] || die "no Hue bulbs found. Check the bulb has mains power, and turn the phone's Bluetooth off -- a bulb connected to it stops advertising."
 
 echo
 echo "Found:"
@@ -63,9 +76,28 @@ ROOM_NAME="${ROOM_NAME:-$DEFAULT_NAME}"
 read -rp "Room type (Bedroom, Office, Living room, ...)? [Other] " ROOM_CLASS
 ROOM_CLASS="${ROOM_CLASS:-Other}"
 
-echo "Trusting $ADDRESS..."
-# No explicit `pair` -- BlueZ bonds on the first encrypted GATT access, and
-# an unprompted pair on a bulb still bonded to a phone often just fails.
+echo "Pairing with $ADDRESS..."
+# Without a stored bond every reconnect has to pair afresh, which the bulb
+# only allows while discoverable -- so the link dies the first time it drops.
+# HueBLE pairs on connect with an agent that auto-confirms the passkey; a
+# one-shot `bluetoothctl pair` has no agent and ends in AuthenticationTimeout.
+ADDRESS="$ADDRESS" "$PYTHON" - <<'PY' || die "pairing failed. Reopen the Alexa screen in the Hue app and retry."
+import asyncio, os
+from bleak import BleakScanner
+from HueBLE import HueBleLight
+
+async def main():
+    device = await BleakScanner.find_device_by_address(os.environ["ADDRESS"], timeout=20)
+    if device is None:
+        raise SystemExit("bulb stopped advertising")
+    light = HueBleLight(device)
+    await light.connect()
+    await light.disconnect()
+
+asyncio.run(main())
+PY
+bluetoothctl info "$ADDRESS" | grep -q 'Bonded: yes' \
+  || die "connected, but BlueZ stored no bond, so the bulb will drop off at the first disconnect. Reopen the Alexa screen and retry."
 bluetoothctl trust "$ADDRESS" >/dev/null || true
 
 mkdir -p "$STATE_DIR"
