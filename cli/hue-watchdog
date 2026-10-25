@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# hue-ble-daemon stays "active" after the bulb drops the BLE link: HueBLE's
+# reconnect fails once and never retries, so every call times out until a
+# restart. Probe through the daemon; restart it only when the probe fails.
+timeout 30 "$HOME/bin/hue" >/dev/null 2>&1 && exit 0
+
+echo "hue unreachable, restarting hue-ble-daemon"
+systemctl --user restart hue-ble-daemon

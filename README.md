@@ -38,8 +38,21 @@ bulb when there is no bridge.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/lunardi0x01/hue-room-remote.git --enable
+omarchy plugin add https://github.com/Jabril-Mahamud/hue-room-remote.git --enable
 ```
+
+For a BLE bulb, also link the `hue` command line tools and the watchdog from
+the plugin checkout, so `omarchy plugin update` keeps them current too:
+
+```sh
+~/.config/omarchy/plugins/lunardi0x01.hue-room-remote/install.sh
+```
+
+That puts everything in `cli/` on `~/bin`: `hue` (status, on/off, colour,
+scenes), `hue-fade.py` (scene fades), `hue-tui.py`, `hue-alarms.py` (wake-up
+timers). It also enables `hue-watchdog.timer`, which restarts the daemon when
+the bulb stops answering, and seeds `~/.config/hue-scenes.json` from
+`examples/` if you don't have one yet.
 
 ## Pairing with the bridge
 
@@ -95,10 +108,12 @@ There are no bridge-stored scenes without a bridge, so scenes come from
 
 ```json
 {
-  "evening": { "colour": "orange", "brightness": 60 },
-  "day":     { "temp": 250, "brightness": 254 },
-  "night":   { "temp": 500, "brightness": 12 },
-  "off":     { "power": false }
+  "evening":   { "section": "Evening", "colour": "orange", "brightness": 60 },
+  "day":       { "temp": 250, "brightness": 254 },
+  "night":     { "temp": 500, "brightness": 12 },
+  "off":       { "power": false },
+  "fireplace": { "colour": "orange", "brightness": 110, "effect": "fireplace" },
+  "surprise":  { "shuffle": true }
 }
 ```
 
@@ -106,6 +121,16 @@ Each key becomes a scene in the panel. `temp` is in mireds (153 cool - 500
 warm), `brightness` is 1-254, and `colour` is one of the names in
 `hue_ble_daemon.py`'s `COLOURS` table. Any scene that sets something other
 than `power` implies the light should be on.
+
+`section` is the panel heading the scene sits under; sections appear in the
+order the file first mentions them. Scenes without one go under "Effects" if
+they carry an effect, "Quick actions" if they're an off, flash or shuffle, and
+"Scenes" otherwise. `examples/hue-scenes.json` is a full example.
+
+A scene may also carry an `effect` (any name in `EffectType`, with an optional
+`speed` 0-255), which is written together with the colour and brightness in one
+go, or be `{"shuffle": true}`, which resolves to a random one of the other
+scenes - skipping power-off and flash scenes.
 
 ### Switching back to a bridge
 

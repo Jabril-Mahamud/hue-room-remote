@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# One entry point for the Hue bulb, so callers (OpenClaw, cron, a keybind)
+# need to know one word rather than which of two scripts owns which verb.
+#
+#   hue                  status
+#   hue on | off | toggle
+#   hue brightness 200   0-254
+#   hue temp 300         153 cool .. 500 warm
+#   hue color amber      named colour
+#   hue evening          a named scene from ~/.config/hue-scenes.json
+#   hue evening 3        the same scene, faded in over 3 minutes
+#   hue candlelight      a scene that carries an effect
+#   hue surprise         a random scene
+#   hue scenes           list scene names
+set -euo pipefail
+
+BIN="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCENES="${XDG_CONFIG_HOME:-$HOME/.config}/hue-scenes.json"
+
+list_scenes() {
+  python3 -c "
+import json, sys
+try:
+    print('\n'.join(sorted(json.load(open(sys.argv[1])))))
+except Exception:
+    pass" "$SCENES"
+}
+
+# Default to status, and make it a real argument -- defaulting only the
+# variable leaves "$@" empty, and hue-control.py with no arguments prints
+# usage instead.
+[ $# -eq 0 ] && set -- state
+cmd="$1"
+
+case "$cmd" in
+  scenes) list_scenes; exit 0 ;;
+  -h|--help|help) exec "$BIN/hue-control.py" ;;
+  # hue-control.py's own verbs win over a same-named scene: "off" exists in
+  # both and the direct power write is the better path.
+  on|off|toggle|state|brightness|temp|color|colour|effect|scene|fade)
+    exec "$BIN/hue-control.py" "$@" ;;
+esac
+
+if list_scenes | grep -qxF -- "$cmd"; then
+  # Second argument is fade duration in minutes; 0 means apply immediately.
+  exec "$BIN/hue-fade.py" "$cmd" "${2:-0}"
+fi
+
+echo "hue: unknown command '$cmd'" >&2
+echo "Try: hue on|off|toggle|state|brightness|temp|color, or a scene name." >&2
+echo "Scenes: $(list_scenes | paste -sd' ')" >&2
+exit 1

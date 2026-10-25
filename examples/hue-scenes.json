@@ -1,0 +1,37 @@
+{
+  "pre-dawn": { "section": "Morning", "temp": 450, "brightness": 30 },
+  "wake": { "section": "Morning", "temp": 320, "brightness": 200 },
+  "sunrise": { "section": "Morning", "colour": "peach", "brightness": 140 },
+
+  "focus": { "section": "Work", "temp": 180, "brightness": 254 },
+  "day": { "section": "Work", "temp": 250, "brightness": 254 },
+  "reading": { "section": "Work", "temp": 330, "brightness": 200 },
+  "flow": { "section": "Work", "colour": "teal", "brightness": 170 },
+  "meeting": { "section": "Work", "colour": "white", "brightness": 230 },
+
+  "evening": { "section": "Evening", "colour": "orange", "brightness": 60 },
+  "golden-hour": { "section": "Evening", "colour": "peach", "brightness": 160 },
+  "sunset": { "section": "Evening", "colour": "coral", "brightness": 130 },
+  "dinner": { "section": "Evening", "colour": "amber", "brightness": 140 },
+  "lounge": { "section": "Evening", "colour": "rose", "brightness": 90 },
+  "gaming": { "section": "Evening", "colour": "magenta", "brightness": 120 },
+  "movie": { "section": "Evening", "colour": "lavender", "brightness": 35 },
+
+  "night": { "section": "Night", "temp": 500, "brightness": 12 },
+  "sleep": { "section": "Night", "temp": 500, "brightness": 20 },
+
+  "candlelight": { "temp": 450, "brightness": 80, "effect": "candle" },
+  "cosmos": { "colour": "purple", "brightness": 90, "effect": "cosmos" },
+  "enchanted": { "colour": "green", "brightness": 100, "effect": "enchant" },
+  "fireplace": { "colour": "orange", "brightness": 110, "effect": "fireplace" },
+  "glisten": { "colour": "yellow", "brightness": 140, "effect": "glisten" },
+  "opal": { "colour": "cool", "brightness": 150, "effect": "opal" },
+  "prism": { "colour": "pink", "brightness": 140, "effect": "prism" },
+  "sparkle": { "colour": "white", "brightness": 180, "effect": "sparkle" },
+  "sunbeam": { "colour": "amber", "brightness": 160, "effect": "sunbeam" },
+  "underwater": { "colour": "blue", "brightness": 90, "effect": "underwater" },
+
+  "alert": { "colour": "red", "brightness": 254, "flash": 5 },
+  "off": { "power": false },
+  "surprise": { "shuffle": true }
+}

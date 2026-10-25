@@ -1,0 +1,6 @@
+[Unit]
+Description=Hue watchdog: restart hue-ble-daemon when the bulb stops answering
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/hue-watchdog
