@@ -152,6 +152,10 @@ function parseGroups(text) {
   return groups
 }
 
+// Scene swatches come from a file the user hand-writes and end up in a QML
+// color property, so only an exact #rrggbb is let through.
+var SWATCH_RE = /^#[0-9a-fA-F]{6}$/
+
 function parseScenes(text) {
   var obj = parseJsonObject(text)
   if (!obj) return []
@@ -166,11 +170,20 @@ function parseScenes(text) {
     if (!scene || typeof scene !== "object") continue
     var group = scene.group !== undefined && scene.group !== null ? String(scene.group) : ""
     if (!group || !isValidId(group)) continue
-    scenes.push({
+    var entry = {
       id: String(id),
       name: sanitizeName(scene.name || "Scene " + id),
       group: group
-    })
+    }
+    // Bridge scenes carry no section, so they all land under one heading.
+    entry.section = typeof scene.section === "string" && scene.section
+      ? sanitizeName(scene.section).slice(0, 40)
+      : "Scenes"
+    entry.sectionRank = typeof scene.sectionRank === "number" ? scene.sectionRank : 0
+    if (typeof scene.swatch === "string" && SWATCH_RE.test(scene.swatch)) {
+      entry.swatch = scene.swatch
+    }
+    scenes.push(entry)
   }
   scenes.sort(function(a, b) { return a.name.localeCompare(b.name) })
   return scenes

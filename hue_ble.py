@@ -16,6 +16,7 @@ one connection open so these calls are milliseconds.
 
 import json
 import os
+import random
 import re
 import socket
 
@@ -34,6 +35,22 @@ DEFAULT_TIMEOUT = 45.0
 MAX_REPLY_BYTES = 1024 * 1024
 
 MAX_SCENES = 100
+
+# Swatches for the panel's scene labels. Hand-picked tints rather than an
+# xy -> sRGB conversion of the COLOURS table: the bulb's coordinates converted
+# honestly give a near-black blue and a muddy purple, neither of which is
+# readable as label text. These are the same hues, lightened until legible.
+SWATCHES = {
+    "red": "#ff6b6b", "orange": "#ffa552", "yellow": "#ffe066",
+    "green": "#7bd88f", "blue": "#7aa2ff", "purple": "#b98cff",
+    "pink": "#ff8ecb", "white": "#f2f2f2", "warm": "#ffcf99",
+    "cool": "#cfe4ff", "amber": "#ffc04d",
+    "rose": "#ff8fa3", "coral": "#ff8a6b", "peach": "#ffbe98",
+    "teal": "#5fd4c4", "lavender": "#c9b6ff", "magenta": "#ff7ae0",
+}
+# Ends of the white range, lerped across 153-500 mireds for a temp scene.
+SWATCH_COOL = (0xCF, 0xE4, 0xFF)
+SWATCH_WARM = (0xFF, 0xB8, 0x6B)
 
 _ADDRESS_RE = re.compile(r'^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
 _SCENE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,40}$')
@@ -132,6 +149,12 @@ def scenes_payload(scenes):
     out = {}
     if not isinstance(scenes, dict):
         return out
+    # Sections are listed in the order they first appear in the file, so the
+    # file's layout is the panel's layout.
+    ranks = {}
+    for scene in scenes.values():
+        if isinstance(scene, dict):
+            ranks.setdefault(scene_section(scene), len(ranks))
     for name in sorted(scenes):
         if len(out) >= MAX_SCENES:
             break
@@ -139,8 +162,79 @@ def scenes_payload(scenes):
             continue
         if not isinstance(scenes[name], dict):
             continue
-        out[str(name)] = {"name": str(name), "group": GROUP_ID}
+        section = scene_section(scenes[name])
+        entry = {"name": str(name), "group": GROUP_ID, "section": section, "sectionRank": ranks[section]}
+        swatch = scene_swatch(scenes[name])
+        if swatch:
+            entry["swatch"] = swatch
+        out[str(name)] = entry
     return out
+
+
+def scene_swatch(scene):
+    """A '#rrggbb' for a scene's label, or None to leave it the panel's own.
+
+    ponytail: only named colours and temperatures get one. A scene written as
+    raw xy (what `hue-fade.py save` produces) would need the xy table to match
+    against, which lives on the daemon side; those keep the default colour until
+    that is worth sharing.
+    """
+    if not isinstance(scene, dict):
+        return None
+    colour = scene.get("colour") or scene.get("color")
+    if colour in SWATCHES:
+        return SWATCHES[colour]
+    if "temp" in scene:
+        mireds = _clamp(scene["temp"], CT_MIN, CT_MAX, None)
+        if mireds is None:
+            return None
+        t = (mireds - CT_MIN) / (CT_MAX - CT_MIN)
+        return "#%02x%02x%02x" % tuple(
+            round(cool + (warm - cool) * t)
+            for cool, warm in zip(SWATCH_COOL, SWATCH_WARM)
+        )
+    return None
+
+
+DEFAULT_SECTIONS = {"mood": "Scenes", "effect": "Effects", "action": "Quick actions"}
+
+
+def scene_section(scene):
+    """The panel heading a scene sits under: its own "section", else its kind's."""
+    section = scene.get("section")
+    if isinstance(section, str) and section.strip():
+        return section.strip()[:40]
+    return DEFAULT_SECTIONS[scene_kind(scene)]
+
+
+def scene_kind(scene):
+    """What a scene does: 'action', 'effect' or 'mood'.
+
+    Actions (off, a flash, a shuffle) don't set a look, so they're checked
+    first: a flash scene with an effect is still a one-shot.
+    """
+    if scene.get("power") is False or scene.get("flash") or scene.get("shuffle"):
+        return "action"
+    if scene.get("effect") not in (None, "", "none", "off"):
+        return "effect"
+    return "mood"
+
+
+def pick_shuffle(scenes):
+    """A random scene name, skipping the entries that are not moods.
+
+    Power-off, flash and shuffle scenes are excluded: a surprise that turns the
+    light off, fires the alert blink or lands back on itself is not one.
+    """
+    pool = [
+        name for name in sorted(scenes)
+        if _SCENE_ID_RE.match(str(name))
+        and isinstance(scenes[name], dict)
+        and scenes[name].get("power") is not False
+        and not scenes[name].get("flash")
+        and not scenes[name].get("shuffle")
+    ]
+    return random.choice(pool) if pool else None
 
 
 def load_scenes():

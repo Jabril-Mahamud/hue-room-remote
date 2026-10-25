@@ -221,9 +221,40 @@ test("parseScenes keeps only scenes tied to a group and sorts by name", () => {
     "s3": { name: "Ungrouped", type: "LightScene", lights: ["1", "2"] }
   }))
   assert.deepEqual(scenes, [
-    { id: "s1", name: "Bright", group: "1" },
-    { id: "s2", name: "Zen", group: "1" }
+    { id: "s1", name: "Bright", group: "1", section: "Scenes", sectionRank: 0 },
+    { id: "s2", name: "Zen", group: "1", section: "Scenes", sectionRank: 0 }
   ])
+})
+
+test("parseScenes keeps a section, sanitised, and defaults to Scenes", () => {
+  const scenes = HueApi.parseScenes(JSON.stringify({
+    a: { name: "a", group: "1", section: "Work", sectionRank: 2 },
+    b: { name: "b", group: "1", section: "<b>Evening</b>" },
+    c: { name: "c", group: "1", section: 7 },
+  }))
+  assert.deepEqual(scenes.map(s => [s.section, s.sectionRank]),
+    [["Work", 2], ["bEvening/b", 0], ["Scenes", 0]])
+})
+
+test("parseScenes keeps a valid swatch and drops anything else", () => {
+  const scenes = HueApi.parseScenes(JSON.stringify({
+    ok: { name: "ok", group: "1", swatch: "#ff6b6b" },
+    short: { name: "short", group: "1", swatch: "#fff" },
+    named: { name: "named", group: "1", swatch: "red" },
+    injected: { name: "injected", group: "1", swatch: "red; border: 1px" },
+    wrongType: { name: "wrongType", group: "1", swatch: 255 },
+    missing: { name: "missing", group: "1" },
+  }))
+  const swatches = {}
+  scenes.forEach(function (s) { swatches[s.name] = s.swatch })
+  assert.deepEqual(swatches, {
+    ok: "#ff6b6b",
+    short: undefined,
+    named: undefined,
+    injected: undefined,
+    wrongType: undefined,
+    missing: undefined,
+  })
 })
 
 test("parseScenes returns an empty list for empty/malformed input", () => {

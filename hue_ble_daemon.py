@@ -10,12 +10,14 @@ Protocol: one JSON object per line in, one JSON object per line out.
   {"op": "state"}                          -> current state
   {"op": "set", "power": true, "bri": 200} -> apply, then current state
   {"op": "scene", "name": "evening"}       -> apply a scene from hue-scenes.json
+  {"op": "effect", "name": "candle"}       -> effect, keeping the current colour
 
 Every reply is {"ok": true, "state": {...}} or {"ok": false, "error": "..."}.
 """
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -39,6 +41,9 @@ CREDS_FILE = os.path.join(
 
 SCAN_TIMEOUT = 10.0
 CT_MIN, CT_MAX = 153, 500
+# Used when an effect or an effect-clearing write needs a colour temperature and
+# the bulb is in colour mode, where it reports the sentinel instead of a temp.
+DEFAULT_TEMP = 370
 # How long to let HueBLE's own reconnect finish before taking over. It
 # retries five times internally with backoff, which can run past 8s; taking
 # over before it has finished just recreates the InProgress race this wait
@@ -56,7 +61,23 @@ COLOURS = {
     "green": (0.21, 0.65), "blue": (0.15, 0.06), "purple": (0.28, 0.12),
     "pink": (0.40, 0.22), "white": (0.32, 0.34), "warm": (0.45, 0.40),
     "cool": (0.30, 0.32), "amber": (0.55, 0.42),
+    # ponytail: eyeballed, not measured like the ones above. Nudge xy here if
+    # one reads off on the bulb; the panel swatch in hue_ble.SWATCHES is separate.
+    "rose": (0.50, 0.30), "coral": (0.60, 0.34), "peach": (0.50, 0.40),
+    "teal": (0.17, 0.35), "lavender": (0.30, 0.20), "magenta": (0.38, 0.16),
 }
+
+
+def _effect_type(name):
+    """EffectType for a scene/request name, rejecting anything unknown.
+
+    EffectType[...] alone raises KeyError, which reaches the client as an
+    unhelpful "KeyError: 'CANDEL'"; this names the actual problem.
+    """
+    key = str(name or "none").upper()
+    if key not in EffectType.__members__:
+        raise ValueError("no such effect: %s" % name)
+    return EffectType[key]
 
 
 class Bulb:
@@ -137,6 +158,16 @@ class Bulb:
             and time.monotonic() - self._cached_at < STATE_CACHE_SECONDS
         ):
             return self._cached_state
+
+        # poll_effects() only assigns _effect when the bulb returns the long,
+        # effect-carrying response, and never clears it when the effect has
+        # stopped -- so a finished effect would be reported forever. Pre-setting
+        # NONE makes "no effect" the default that a running one overwrites, and
+        # keeps supports_effects true (it tests for None) so poll_state still
+        # reads the characteristic.
+        if getattr(self.light, "supports_effects", False):
+            self.light._effect = EffectType.NONE
+            self.light._effect_speed = 0
 
         await self.light.poll_state()
         xy = self.light.colour_xy
@@ -225,26 +256,55 @@ class Bulb:
             # the bulb reports it: a sentinel, surfaced here as None.
             applied["temp"] = int(spec["temp"])
             applied["xy"] = None
+            # A temperature write is also the only thing that stops a running
+            # effect, so the cache must not keep reporting one.
+            applied["effect"] = None
         if spec.get("xy"):
             await self.light.set_colour_xy(float(spec["xy"][0]), float(spec["xy"][1]))
             applied["xy"] = [float(spec["xy"][0]), float(spec["xy"][1])]
             applied["temp"] = None
         return applied
 
+    def _effect_running(self):
+        effect = (self._cached_state or {}).get("effect")
+        return bool(effect) and str(effect.get("name") or "NONE") != "NONE"
+
     async def _apply_effect(self, req):
-        effect = EffectType[str(req.get("name", "none")).upper()]
+        effect = _effect_type(req.get("name"))
         speed = max(0, min(255, int(req.get("speed", 128))))
+        bri = int(req.get("brightness", self.light.brightness or 128))
         if req.get("kind") == "temperature":
-            await self.light.set_temperature_effect(
-                effect, int(req["temp"]), speed
-            )
+            temp = int(req["temp"])
+            await self.light.set_temperature_effect(temp, bri, effect, speed)
+            applied = {"temp": temp, "xy": None}
         else:
-            await self.light.set_colour_effect(effect, speed)
-        return {"effect": {"name": effect.name, "speed": speed}}
+            xy = req.get("xy")
+            if not hue_ble._valid_xy(xy):
+                xy = self.light.colour_xy
+            if not hue_ble._valid_xy(xy):
+                xy = (0.45, 0.42)
+            x, y = float(xy[0]), float(xy[1])
+            await self.light.set_colour_effect(x, y, bri, effect, speed)
+            applied = {"xy": [x, y], "temp": None}
+        # The effect characteristic carries brightness and colour, and it turns
+        # the bulb on. _merge_state trusts the write rather than re-polling, so
+        # everything this wrote has to be reported or the panel shows the
+        # pre-effect brightness.
+        applied.update({
+            "brightness": bri,
+            "power": True,
+            "effect": {"name": effect.name, "speed": speed},
+        })
+        return applied
 
     async def _apply_scene(self, name):
         scenes = hue_ble.load_scenes()
         scene = scenes.get(str(name))
+        if isinstance(scene, dict) and scene.get("shuffle"):
+            # A shuffle scene is an indirection, not a state: resolve it once and
+            # apply whatever it landed on.
+            name = hue_ble.pick_shuffle(scenes)
+            scene = scenes.get(str(name)) if name else None
         if not isinstance(scene, dict):
             raise ValueError("no such scene: %s" % name)
         spec = {}
@@ -261,7 +321,44 @@ class Bulb:
         # should be on; the file format has no explicit "on" for those.
         if spec and "power" not in spec:
             spec["power"] = True
+
+        effect = str(scene.get("effect") or "none")
+        if _effect_type(effect) is not EffectType.NONE:
+            return await self._apply_scene_effect(scene, spec, effect)
+        if self._effect_running():
+            # Only a write to the temperature characteristic stops a running
+            # effect -- brightness and xy writes leave it going -- so a plain
+            # scene has to clear it before setting its own colour.
+            await self.light.set_colour_temp(int(spec.get("temp", DEFAULT_TEMP)))
         return await self._apply(spec)
+
+    async def _apply_scene_effect(self, scene, spec, effect):
+        """Apply a scene whose colour is carried by an effect write.
+
+        The effect characteristic takes colour and brightness with it, so this is
+        one write instead of a colour write followed by an effect write -- which
+        matters on BLE, where every write is ~0.25s and a spare one is a chance
+        to fail mid-scene.
+        """
+        applied = {}
+        if spec.get("power"):
+            await self.light.set_power(True)
+            applied["power"] = True
+        req = {
+            "name": effect,
+            "speed": scene.get("speed", 128),
+            "brightness": spec.get("brightness", self.light.brightness or 128),
+        }
+        if "xy" in spec:
+            req["kind"] = "colour"
+            req["xy"] = spec["xy"]
+        elif "temp" in spec:
+            req["kind"] = "temperature"
+            req["temp"] = spec["temp"]
+        else:
+            req["kind"] = "colour"  # keep whatever colour the bulb already holds
+        applied.update(await self._apply_effect(req))
+        return applied
 
 
 async def serve(bulb, path):
@@ -304,6 +401,9 @@ def _load_address():
 
 
 def main():
+    # HueBLE logs every disconnect, reconnect and pairing failure; without a
+    # handler they vanish and a lost bond is indistinguishable from a dead bulb.
+    logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
     address = _load_address()
     bulb = Bulb(address)
     try:

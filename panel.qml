@@ -60,8 +60,36 @@ Panel {
     return ""
   }
 
+  // Section headings in the order hue-scenes.json introduces them.
+  readonly property var sceneSections: {
+    var seen = {}
+    var out = []
+    root.orderedScenesForActiveRoom.forEach(function(s) {
+      if (seen[s.section]) return
+      seen[s.section] = true
+      out.push({ title: s.section, rank: s.sectionRank })
+    })
+    out.sort(function(a, b) { return a.rank - b.rank })
+    return out
+  }
+
+  function scenesInSection(title) {
+    return root.orderedScenesForActiveRoom.filter(function(s) { return s.section === title })
+  }
+
   function withAlpha(color, alpha) {
     return Qt.rgba(color.r, color.g, color.b, alpha)
+  }
+
+  // Scene swatches are tints picked to read on a dark panel. A light Omarchy
+  // theme gives the panel a dark foreground, and the same tints wash out
+  // against it, so they are darkened there instead.
+  readonly property bool lightTheme:
+    (0.299 * bar.foreground.r + 0.587 * bar.foreground.g + 0.114 * bar.foreground.b) < 0.5
+
+  function sceneColour(swatch) {
+    if (!swatch) return root.bar.foreground
+    return root.lightTheme ? Qt.darker(swatch, 1.9) : swatch
   }
 
   function findRoom(roomId) {
@@ -248,11 +276,16 @@ Panel {
     root.queueAction("write-order", "order", { roomOrder: ids })
   }
 
+  // Scenes render in sections, so ▲/▼ swaps with the nearest scene in the same
+  // section; a plain neighbour swap would move it across a hidden boundary.
   function moveScene(roomId, sceneId, direction) {
-    var ids = root.orderedScenesForActiveRoom.map(function(s) { return s.id })
+    var scenes = root.orderedScenesForActiveRoom
+    var ids = scenes.map(function(s) { return s.id })
     var idx = ids.indexOf(sceneId)
+    if (idx < 0) return
     var next = idx + direction
-    if (idx < 0 || next < 0 || next >= ids.length) return
+    while (next >= 0 && next < ids.length && scenes[next].section !== scenes[idx].section) next += direction
+    if (next < 0 || next >= ids.length) return
     var tmp = ids[idx]
     ids[idx] = ids[next]
     ids[next] = tmp
@@ -950,77 +983,90 @@ Panel {
         width: parent.width
         spacing: Style.space(6)
 
-        Text {
-          text: "Scenes"
-          color: Qt.darker(root.bar.foreground, 1.4)
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
-          font.letterSpacing: 1
-          font.bold: true
-        }
-
         Repeater {
-          model: root.orderedScenesForActiveRoom
+          model: root.sceneSections
 
-          Rectangle {
-            id: sceneRow
+          Column {
+            id: section
             required property var modelData
-            required property int index
+            readonly property var scenes: root.scenesInSection(modelData.title)
             width: parent.width
-            height: sceneText.implicitHeight + Style.space(16)
-            radius: Style.space(8)
-            color: sceneMouse.containsMouse
-              ? root.withAlpha(root.bar.foreground, 0.10)
-              : root.withAlpha(root.bar.foreground, 0.04)
-            border.width: 1
-            border.color: root.withAlpha(root.bar.foreground, sceneMouse.containsMouse ? 0.28 : 0.14)
+            spacing: Style.space(6)
+            topPadding: Style.space(4)
 
             Text {
-              id: sceneText
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(12)
-              anchors.verticalCenter: parent.verticalCenter
-              text: sceneRow.modelData.name
-              textFormat: Text.PlainText
-              color: root.bar.foreground
+              text: section.modelData.title
+              color: Qt.darker(root.bar.foreground, 1.4)
               font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.body
+              font.pixelSize: Style.font.caption
+              font.letterSpacing: 1
+              font.bold: true
             }
 
-            MouseArea {
-              id: sceneMouse
-              anchors.left: parent.left
-              anchors.right: sceneTrailingControls.left
-              anchors.top: parent.top
-              anchors.bottom: parent.bottom
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.applyScene(root.activeRoomId, sceneRow.modelData.id)
-            }
+            Repeater {
+              model: section.scenes
 
-            Row {
-              id: sceneTrailingControls
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(2)
+              Rectangle {
+                id: sceneRow
+                required property var modelData
+                required property int index
+                width: parent.width
+                height: sceneText.implicitHeight + Style.space(16)
+                radius: Style.space(8)
+                color: sceneMouse.containsMouse
+                  ? root.withAlpha(root.bar.foreground, 0.10)
+                  : root.withAlpha(root.bar.foreground, 0.04)
+                border.width: 1
+                border.color: root.withAlpha(root.bar.foreground, sceneMouse.containsMouse ? 0.28 : 0.14)
 
-              PanelActionButton {
-                visible: root.editMode
-                iconText: "▲"
-                foreground: root.bar.foreground
-                fontFamily: root.bar.fontFamily
-                enabled: sceneRow.index > 0
-                onClicked: root.moveScene(root.activeRoomId, sceneRow.modelData.id, -1)
-              }
+                Text {
+                  id: sceneText
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(12)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: sceneRow.modelData.name
+                  textFormat: Text.PlainText
+                  color: root.sceneColour(sceneRow.modelData.swatch)
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.body
+                }
 
-              PanelActionButton {
-                visible: root.editMode
-                iconText: "▼"
-                foreground: root.bar.foreground
-                fontFamily: root.bar.fontFamily
-                enabled: sceneRow.index < root.orderedScenesForActiveRoom.length - 1
-                onClicked: root.moveScene(root.activeRoomId, sceneRow.modelData.id, 1)
+                MouseArea {
+                  id: sceneMouse
+                  anchors.left: parent.left
+                  anchors.right: sceneTrailingControls.left
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.applyScene(root.activeRoomId, sceneRow.modelData.id)
+                }
+
+                Row {
+                  id: sceneTrailingControls
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+
+                  PanelActionButton {
+                    visible: root.editMode
+                    iconText: "▲"
+                    foreground: root.bar.foreground
+                    fontFamily: root.bar.fontFamily
+                    enabled: sceneRow.index > 0
+                    onClicked: root.moveScene(root.activeRoomId, sceneRow.modelData.id, -1)
+                  }
+
+                  PanelActionButton {
+                    visible: root.editMode
+                    iconText: "▼"
+                    foreground: root.bar.foreground
+                    fontFamily: root.bar.fontFamily
+                    enabled: sceneRow.index < section.scenes.length - 1
+                    onClicked: root.moveScene(root.activeRoomId, sceneRow.modelData.id, 1)
+                  }
+                }
               }
             }
           }
