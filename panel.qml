@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "hue_api.js" as HueApi
 
@@ -604,7 +605,7 @@ Panel {
               anchors.verticalCenter: titleRow.verticalCenter
               iconText: "⚙"
               tooltipText: root.editMode ? "Done reordering" : "Reorder rooms and scenes"
-              foreground: root.editMode ? Color.accent : root.bar.foreground
+              foreground: root.editMode ? Commons.Color.accent : root.bar.foreground
               fontFamily: root.bar.fontFamily
               onClicked: root.editMode = !root.editMode
             }
@@ -644,7 +645,7 @@ Panel {
               width: parent.width
               height: pairButton.implicitHeight + Style.space(16)
               radius: Style.space(8)
-              color: pairButtonMouse.containsMouse ? Qt.lighter(Color.accent, 1.2) : Color.accent
+              color: pairButtonMouse.containsMouse ? Qt.lighter(Commons.Color.accent, 1.2) : Commons.Color.accent
 
               Text {
                 id: pairButton
@@ -705,7 +706,7 @@ Panel {
             text: root.transport === "ble"
               ? "Couldn't reach the light. Check it has mains power and that hue-ble-daemon is running (systemctl --user status hue-ble-daemon)."
               : "Couldn't reach the bridge. Check the bridge is on and the IP is still valid, then re-run pair.sh."
-            color: Color.urgent
+            color: Commons.Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
@@ -715,7 +716,7 @@ Panel {
             visible: root.insecureMode
             width: parent.width
             text: "Bridge identity not verified — re-run pair.sh to confirm you're talking to your own bridge."
-            color: Color.urgent
+            color: Commons.Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
@@ -806,7 +807,7 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     checked: roomRow.modelData.on
                     foreground: root.bar.foreground
-                    accent: Color.accent
+                    accent: Commons.Color.accent
                     onToggled: root.toggleRoom(roomRow.modelData.id, !roomRow.modelData.on)
                   }
 
@@ -841,7 +842,7 @@ Panel {
                     id: starIcon
                     anchors.verticalCenter: parent.verticalCenter
                     text: roomRow.modelData.id === root.favoriteRoomId ? "★" : "☆"
-                    color: roomRow.modelData.id === root.favoriteRoomId ? Color.accent : Qt.darker(root.bar.foreground, 1.6)
+                    color: roomRow.modelData.id === root.favoriteRoomId ? Commons.Color.accent : Qt.darker(root.bar.foreground, 1.6)
                     font.pixelSize: Style.font.title
 
                     MouseArea {
@@ -934,7 +935,7 @@ Panel {
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
           text: root.activeRoomId === root.favoriteRoomId ? "★" : "☆"
-          color: root.activeRoomId === root.favoriteRoomId ? Color.accent : Qt.darker(root.bar.foreground, 1.6)
+          color: root.activeRoomId === root.favoriteRoomId ? Commons.Color.accent : Qt.darker(root.bar.foreground, 1.6)
           font.pixelSize: Style.font.title
 
           MouseArea {
@@ -961,7 +962,7 @@ Panel {
         label: root.activeRoom ? (HueApi.roomIcon(root.activeRoom.class) + "  " + root.activeRoom.name) : ""
         checked: root.activeRoom ? root.activeRoom.on : false
         foreground: root.bar.foreground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.bar.fontFamily
         onClicked: if (root.activeRoom) root.toggleRoom(root.activeRoomId, !root.activeRoom.on)
       }
