@@ -10,9 +10,14 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/settings"
 CREDS="$STATE_DIR/hue.json"
 UNIT_DIR="$HOME/.config/systemd/user"
+# Optional, gitignored: lets a fresh install re-pair the same bulb without
+# the scan. See .env.example.
+# shellcheck source=/dev/null
+[ -f "$PLUGIN_DIR/.env" ] && . "$PLUGIN_DIR/.env"
 PYTHON="${HUE_BLE_PYTHON:-python3}"
 
 die() { echo "error: $*" >&2; exit 1; }
+valid_mac() { [[ "$1" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]]; }
 
 command -v bluetoothctl >/dev/null || die "bluetoothctl not found (install bluez-utils)"
 "$PYTHON" -c 'import bleak, HueBLE' 2>/dev/null \
@@ -31,11 +36,19 @@ read -rp "Press enter when ready. "
 # the pairing below as org.bluez.Error.InProgress.
 systemctl --user stop hue-ble-daemon.service 2>/dev/null || true
 
-echo "Scanning for Hue bulbs (20s)..."
-# Match on the Philips/Signify service UUID (fe0f) rather than the device
-# name: a bulb that has been factory reset advertises under a rotating
-# private address with no name attached until it is connected to.
-mapfile -t FOUND < <("$PYTHON" - <<'PY'
+if [ -n "${HUE_BLE_ADDRESS:-}" ]; then
+  # Re-pairing from .env (e.g. a fresh install): the bulb is already known,
+  # so skip the scan and the prompts.
+  valid_mac "$HUE_BLE_ADDRESS" || die "HUE_BLE_ADDRESS in .env is not a MAC address"
+  ADDRESS="$HUE_BLE_ADDRESS"
+  ROOM_NAME="${HUE_ROOM_NAME:-Hue light}"
+  ROOM_CLASS="${HUE_ROOM_CLASS:-Other}"
+else
+  echo "Scanning for Hue bulbs (20s)..."
+  # Match on the Philips/Signify service UUID (fe0f) rather than the device
+  # name: a bulb that has been factory reset advertises under a rotating
+  # private address with no name attached until it is connected to.
+  mapfile -t FOUND < <("$PYTHON" - <<'PY'
 import asyncio
 from bleak import BleakScanner
 
@@ -54,27 +67,28 @@ async def main():
 
 asyncio.run(main())
 PY
-)
+  )
 
-[ "${#FOUND[@]}" -gt 0 ] || die "no Hue bulbs found. Check the bulb has mains power, and turn the phone's Bluetooth off -- a bulb connected to it stops advertising."
+  [ "${#FOUND[@]}" -gt 0 ] || die "no Hue bulbs found. Check the bulb has mains power, and turn the phone's Bluetooth off -- a bulb connected to it stops advertising."
 
-echo
-echo "Found:"
-for i in "${!FOUND[@]}"; do
-  IFS=$'\t' read -r addr name rssi <<<"${FOUND[$i]}"
-  printf "  [%d] %s  %s  (rssi %s)\n" "$((i + 1))" "$addr" "$name" "$rssi"
-done
-echo
-read -rp "Which bulb? [1] " choice
-choice="${choice:-1}"
-[[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#FOUND[@]}" ] \
-  || die "invalid selection"
-IFS=$'\t' read -r ADDRESS DEFAULT_NAME _ <<<"${FOUND[$((choice - 1))]}"
+  echo
+  echo "Found:"
+  for i in "${!FOUND[@]}"; do
+    IFS=$'\t' read -r addr name rssi <<<"${FOUND[$i]}"
+    printf "  [%d] %s  %s  (rssi %s)\n" "$((i + 1))" "$addr" "$name" "$rssi"
+  done
+  echo
+  read -rp "Which bulb? [1] " choice
+  choice="${choice:-1}"
+  [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#FOUND[@]}" ] \
+    || die "invalid selection"
+  IFS=$'\t' read -r ADDRESS DEFAULT_NAME _ <<<"${FOUND[$((choice - 1))]}"
 
-read -rp "Room name to show in the panel? [$DEFAULT_NAME] " ROOM_NAME
-ROOM_NAME="${ROOM_NAME:-$DEFAULT_NAME}"
-read -rp "Room type (Bedroom, Office, Living room, ...)? [Other] " ROOM_CLASS
-ROOM_CLASS="${ROOM_CLASS:-Other}"
+  read -rp "Room name to show in the panel? [$DEFAULT_NAME] " ROOM_NAME
+  ROOM_NAME="${ROOM_NAME:-$DEFAULT_NAME}"
+  read -rp "Room type (Bedroom, Office, Living room, ...)? [Other] " ROOM_CLASS
+  ROOM_CLASS="${ROOM_CLASS:-Other}"
+fi
 
 echo "Pairing with $ADDRESS..."
 # Without a stored bond every reconnect has to pair afresh, which the bulb
